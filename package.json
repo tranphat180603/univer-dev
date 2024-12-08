@@ -1,0 +1,42 @@
+{
+  "name": "univer-dev",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.2",
+    "vite": "^6.0.1"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "@univerjs/core": "^0.5.1",
+    "@univerjs/data-validation": "^0.5.1",
+    "@univerjs/design": "^0.5.1",
+    "@univerjs/docs": "^0.5.1",
+    "@univerjs/docs-drawing": "^0.5.1",
+    "@univerjs/docs-ui": "^0.5.1",
+    "@univerjs/engine-formula": "^0.5.1",
+    "@univerjs/engine-render": "^0.5.1",
+    "@univerjs/presets": "^0.5.1",
+    "@univerjs/rpc-node": "^0.5.1",
+    "@univerjs/sheets": "^0.5.1",
+    "@univerjs/sheets-conditional-formatting": "^0.5.1",
+    "@univerjs/sheets-data-validation": "^0.5.1",
+    "@univerjs/sheets-drawing": "^0.5.1",
+    "@univerjs/sheets-filter": "^0.5.1",
+    "@univerjs/sheets-formula": "^0.5.1",
+    "@univerjs/sheets-formula-ui": "^0.5.1",
+    "@univerjs/sheets-hyper-link": "^0.5.1",
+    "@univerjs/sheets-numfmt": "^0.5.1",
+    "@univerjs/sheets-numfmt-ui": "^0.5.1",
+    "@univerjs/sheets-sort": "^0.5.1",
+    "@univerjs/sheets-ui": "^0.5.1",
+    "@univerjs/thread-comment": "^0.5.1",
+    "@univerjs/ui": "^0.5.1"
+  }
+}
