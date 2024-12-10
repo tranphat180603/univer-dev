@@ -1,107 +1,146 @@
-import { LocaleType, Tools, Univer, UniverInstanceType, FUniver, CellValue } from "@univerjs/core";
-import { defaultTheme } from "@univerjs/design";
- 
-import { UniverFormulaEnginePlugin } from "@univerjs/engine-formula";
-import { UniverRenderEnginePlugin } from "@univerjs/engine-render";
-import { UniverUIPlugin } from "@univerjs/ui";
-import { UniverDocsPlugin } from "@univerjs/docs";
-import { UniverDocsUIPlugin } from "@univerjs/docs-ui";
-import { UniverSheetsPlugin } from "@univerjs/sheets";
-import { UniverSheetsUIPlugin } from "@univerjs/sheets-ui";
-import { UniverSheetsFormulaPlugin } from "@univerjs/sheets-formula";
-import { UniverSheetsFormulaUIPlugin } from "@univerjs/sheets-formula-ui";
-import { UniverSheetsNumfmtPlugin } from "@univerjs/sheets-numfmt";
-import { UniverSheetsNumfmtUIPlugin } from "@univerjs/sheets-numfmt-ui";
- 
-import DesignEnUS from '@univerjs/design/locale/en-US';
-import UIEnUS from '@univerjs/ui/locale/en-US';
-import DocsUIEnUS from '@univerjs/docs-ui/locale/en-US';
-import SheetsEnUS from '@univerjs/sheets/locale/en-US';
-import SheetsUIEnUS from '@univerjs/sheets-ui/locale/en-US';
-import SheetsFormulaUIEnUS from '@univerjs/sheets-formula-ui/locale/en-US';
-import SheetsNumfmtUIEnUS from '@univerjs/sheets-numfmt-ui/locale/en-US';
- 
-// The Facade API here is optional, you can decide whether to import it according to your needs
-import '@univerjs/engine-formula/facade';
-import '@univerjs/ui/facade';
-import '@univerjs/docs-ui/facade';
-import '@univerjs/sheets/facade';
-import '@univerjs/sheets-ui/facade';
-import '@univerjs/sheets-formula/facade';
-import '@univerjs/sheets-numfmt/facade';
- 
-import "@univerjs/design/lib/index.css";
-import "@univerjs/ui/lib/index.css";
-import "@univerjs/docs-ui/lib/index.css";
-import "@univerjs/sheets-ui/lib/index.css";
-import "@univerjs/sheets-formula-ui/lib/index.css";
+import '@univerjs/design/lib/index.css';
+
+import { Univer, LocaleType, UniverInstanceType, IWorkbookData, SheetTypes, BooleanNumber } from '@univerjs/core';
+import { defaultTheme } from '@univerjs/design';
+import { UniverDocsPlugin } from '@univerjs/docs';
+import { UniverDocsUIPlugin } from '@univerjs/docs-ui';
+import { UniverFormulaEnginePlugin } from '@univerjs/engine-formula';
+import { UniverRenderEnginePlugin } from '@univerjs/engine-render';
+import { UniverSheetsPlugin } from '@univerjs/sheets';
+import { UniverSheetsFormulaPlugin } from '@univerjs/sheets-formula';
+import { UniverSheetsUIPlugin } from '@univerjs/sheets-ui';
+import { UniverUIPlugin } from '@univerjs/ui';
 
 
-interface spreadsheet{
-    sheet: FUniver
+const _data = {
+    id: 'workbook-01',
+    locale: LocaleType.ZH_CN,
+    name: 'universheet',
+    sheetOrder: ['sheet-01', 'sheet-02', 'sheet-03'],
+    appVersion: '3.0.0-alpha',
+    sheets: {
+      'sheet-01': {
+        type: SheetTypes.GRID,
+        id: 'sheet-01',
+        cellData: {
+          0: {
+            0: {
+              v: 'Hello World',
+            },
+          },
+        },
+        name: 'sheet1',
+        tabColor: 'red',
+        hidden: BooleanNumber.FALSE,
+        rowCount: 1000,
+        columnCount: 20,
+        zoomRatio: 1,
+        scrollTop: 200,
+        scrollLeft: 100,
+        defaultColumnWidth: 93,
+        defaultRowHeight: 27,
+        status: 1,
+        showGridlines: 1,
+        hideRow: [],
+        hideColumn: [],
+        rowHeader: {
+          width: 46,
+          hidden: BooleanNumber.FALSE,
+        },
+        columnHeader: {
+          height: 20,
+          hidden: BooleanNumber.FALSE,
+        },
+        selections: ['A2'],
+        rightToLeft: BooleanNumber.FALSE,
+        pluginMeta: {},
+      },
+      'sheet-02': {
+        type: SheetTypes.GRID,
+        id: 'sheet-02',
+        name: 'sheet2',
+        cellData: {},
+      },
+      'sheet-03': {
+        type: SheetTypes.GRID,
+        id: 'sheet-03',
+        name: 'sheet3',
+        cellData: {},
+      },
+    },
 }
 
-export default class Sheet implements spreadsheet{
-  private _sheet: FUniver;
-  private _univer: Univer;
-
-  constructor(){
-    this._univer = new Univer({
-        theme: defaultTheme,
-        locale: LocaleType.EN_US,
-        locales: {
-          [LocaleType.EN_US]: Tools.deepMerge(
-            SheetsEnUS,
-            DocsUIEnUS,
-            SheetsUIEnUS,
-            SheetsFormulaUIEnUS,
-            UIEnUS,
-            DesignEnUS,
-          ),
-        },
-      });
-    this._sheet = FUniver.newAPI(this._univer)
-  }
-
-  get sheet(){
-    return this._sheet
-  }
-
-  create_sheet(): void{
-    this._univer.registerPlugin(UniverRenderEnginePlugin);
-    this._univer.registerPlugin(UniverFormulaEnginePlugin);
-     
-    this._univer.registerPlugin(UniverUIPlugin, {
-      container: 'app',
-    });
-     
-    this._univer.registerPlugin(UniverDocsPlugin);
-    this._univer.registerPlugin(UniverDocsUIPlugin);
-     
-    this._univer.registerPlugin(UniverSheetsPlugin);
-    this._univer.registerPlugin(UniverSheetsUIPlugin);
-    this._univer.registerPlugin(UniverSheetsFormulaPlugin);
-    this._univer.registerPlugin(UniverSheetsFormulaUIPlugin);
-     
-    this._univer.createUnit(UniverInstanceType.UNIVER_SHEET, {});
-     
-    this._sheet = FUniver.newAPI(this._univer);
-  }
-
-  get_sheet_data():void {
-    const sheet = this._sheet.getActiveWorkbook()?.getActiveSheet();
-    this._sheet.getHooks().onRendered(() => {
-        if(sheet){
-            const selection = sheet.getSelection();
-            console.log(selection);
-           
-            const range = selection?.getActiveRange();
-            console.log(range);
-            return range
+export class Sheet {
+    private univer: Univer | null = null;
+    private workbook: any;
+    private container: HTMLElement | null = null;
+    public init(data: Partial<IWorkbookData> = _data, containerId: string | HTMLElement = 'app'): void {
+        // Resolve the container element
+        if (typeof containerId === 'string') {
+            const el = document.getElementById(containerId);
+            if (!el) {
+                throw new Error(`Container element with ID '${containerId}' not found.`);
+            }
+            this.container = el;
+        } else {
+            this.container = containerId;
         }
-        else{
-            console.log("Can not get sheet!")
+
+        if (!this.container) {
+            throw new Error('Container not initialized');
         }
-      });
-  }
+
+        // Create the Univer instance
+        this.univer = new Univer({
+            theme: defaultTheme,
+            locale: LocaleType.EN_US,
+        });
+
+        // Register core plugins
+        this.univer.registerPlugin(UniverRenderEnginePlugin);
+        this.univer.registerPlugin(UniverFormulaEnginePlugin);
+        this.univer.registerPlugin(UniverUIPlugin, {
+            container: this.container,
+        });
+
+        // Register doc plugins
+        this.univer.registerPlugin(UniverDocsPlugin, {
+            hasScroll: false,
+        });
+        this.univer.registerPlugin(UniverDocsUIPlugin);
+
+        // Register sheet plugins
+        this.univer.registerPlugin(UniverSheetsPlugin);
+        this.univer.registerPlugin(UniverSheetsUIPlugin);
+        this.univer.registerPlugin(UniverSheetsFormulaPlugin);
+
+        // Create a new workbook instance
+        this.workbook = this.univer.createUnit(UniverInstanceType.UNIVER_SHEET, data);
+        if (!this.workbook) {
+            throw new Error('Workbook is not initialized');
+        }
+        this.workbook.save();
+        return <div ref={this.container} className="univer-container" />;
+    }
+
+    /**
+     * Destroy the Univer instance and workbook.
+     */
+    public destroy(): void {
+        // If there's a cleanup method available, call it here
+        // this.univer?.dispose();
+        this.univer = null;
+        this.workbook = null;
+        this.container = null;
+    }
+
+    /**
+     * Get the current workbook data.
+     */
+    public getData(): IWorkbookData {
+        if (!this.workbook) {
+            throw new Error('Workbook is not initialized');
+        }
+        return this.workbook.save();
+    }
 }

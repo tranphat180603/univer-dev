@@ -1,9 +1,15 @@
-export function setupCounter(element: HTMLButtonElement) {
-  let counter = 0
-  const setCounter = (count: number) => {
-    counter = count
-    element.innerHTML = `count is ${counter}`
+function fib(n: number): number{
+  let result = 0
+  if(n = 0){
+    result += 0
   }
-  element.addEventListener('click', () => setCounter(counter + 1))
-  setCounter(0)
+  else if(n = 1){
+    result += 1
+  }
+  else{
+    result += fib(n-1) + fib(n-2)
+  }
+
+  return result
+  
 }
