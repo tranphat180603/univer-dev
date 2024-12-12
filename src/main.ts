@@ -30,6 +30,11 @@ type Matrix = {
   };
 };
 
+type SheetTable = {
+  tableName: string,
+  headers: string[],
+  rows: { [key: string]: { [key: string]: string } },
+}
 
  // Create sheet instance
 const { univerAPI } = createUniver({
@@ -99,19 +104,34 @@ function extractTablesAndValues(matrix: Matrix) {
     matrix[row]?.[column]?.['v'] !== undefined && !visited.has(`${row},${column}`);
 
   // Helper to traverse a table to get data
-  const traverseTable = (row: string, column: string) => {
-    const table = [];
+  const traverseTable = (row: string, column: string, tableName: string, tableBounds: {}) => {
+    const headers: string[] = [];
+    const tables: SheetTable[] = [];
+    const table: SheetTable = {
+      tableName,
+      headers,
+      rows:
+    };
+
+    
     if (matrix[row]?.[column]) {
       const rowData: {[key:string]: string} = {};
       if (isValidCell(row, column)) {
         const cellValue = matrix[row][column]['v'];
+        if (parseInt(row) === 0){ //identify headers when the row equal to 0 does not seem to work all the time
+          headers.push(cellValue)
+        }
         rowData[`Column_${parseInt(column) + 1}`] = cellValue;
         visited.add(`${row},${column}`); // Mark cell as visited
       }
-      table.push({ [`Row_${parseInt(row) + 1}`]: rowData });
+      table.rows.push({
+        [`Row_${parseInt(row) + 1}`]: rowData,
+      });
+      tables.push(table)
     }
-    return table;
+    return tables;
   };
+
 
   for (const row in matrix) {
     for (const column in matrix[row]) {
@@ -123,19 +143,29 @@ function extractTablesAndValues(matrix: Matrix) {
         !matrix[+row - 1]?.[+column] &&      // Top
         !matrix[+row + 1]?.[+column] &&      // Bottom
         !matrix[+row]?.[+column - 1] &&      // Left
-        !matrix[+row]?.[+column + 1] &&      // Right
-        !matrix[+row - 1]?.[+column - 1] &&  // Top-Left
-        !matrix[+row - 1]?.[+column + 1] &&  // Top-Right
-        !matrix[+row + 1]?.[+column - 1] &&  // Bottom-Left
-        !matrix[+row + 1]?.[+column + 1];    // Bottom-Right
-
+        !matrix[+row]?.[+column + 1]         // Right
 
         if (isStandalone) {
           standaloneValues.push({ [`Row_${parseInt(row) + 1}`]: { [`Column_${parseInt(column)+1}`]: cellValue } });
           visited.add(`${row},${column}`);
-        } else {
+        } else { //for every table
+
+          let table_name: string = "example_table"
+
+          // ftt = farthest to the
+          const ftt_left: string = matrix[+row]?.[+column - 1]?.['v'] === undefined ? column.toString() : "";
+          const ftt_right: string = matrix[+row]?.[+column + 1]?.['v'] === undefined ? column.toString() : "";
+          const ftt_top: string = matrix[+row - 1]?.[+column]?.['v'] === undefined ? row.toString() : "";
+          const ftt_bottom: string = matrix[+row + 1]?.[+column]?.['v'] === undefined ? row.toString() : "";          
+
+          const table_bounds: {[key: string]: {}} = {
+            'left': ftt_left,
+            'top': ftt_top,
+            'right': ftt_right,
+            'bottom': ftt_bottom
+          }
           // Start of a new table
-          const table = traverseTable(row, column);
+          const table = traverseTable(row, column, table_name, table_bounds);
           tables.push(table);
         }
       }
