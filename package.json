@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@google/generative-ai": "^0.21.0",
     "@univerjs/core": "^0.5.1",
     "@univerjs/data-validation": "^0.5.1",
     "@univerjs/design": "^0.5.1",
