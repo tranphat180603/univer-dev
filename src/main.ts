@@ -1,6 +1,7 @@
-import "./style.css";
 
-import { ICellData, LocaleType, ObjectMatrix, Univer, UniverInstanceType } from "@univerjs/core";
+
+import "./style.css";
+import { ICellData, IRange, LocaleType, ObjectMatrix, Univer, UniverInstanceType, CellValue } from "@univerjs/core";
 import { defaultTheme } from "@univerjs/design";
 import { UniverDocsPlugin } from "@univerjs/docs";
 import { UniverDocsUIPlugin } from "@univerjs/docs-ui";
@@ -19,22 +20,14 @@ import { UniverSheetsCorePreset } from '@univerjs/presets/preset-sheets-core';
 import UniverPresetSheetsCoreEnUS from '@univerjs/presets/preset-sheets-core/locales/en-US';
 import '@univerjs/presets/lib/styles/preset-sheets-core.css';
 import Gemini from "./LLMservice";
+import { createTableSkeleton } from "@univerjs/engine-render/lib/types/components/docs/layout/block/table.js";
+
 
 //Types
-type CellData = {
-  v: string; // The cell value
-};
-
-type Matrix = {
-  [row: string]: {
-    [column: string]: CellData;
-  };
-};
-
+export type Matrix = { [rowIndex: string]: { [colIndex: string]: ICellData } }
 export type SheetTable = {
   tableName: string,
-  headers: string[],
-  rows: { columns: string[] }[],
+  rows: Matrix,
   tableBounds: {
     left: string,
     top: string,
@@ -43,8 +36,7 @@ export type SheetTable = {
   }
 }
 
-
- // Create sheet instance
+ // Create Univer API instance
 const { univerAPI } = createUniver({
   locale: LocaleType.EN_US,
   locales: {
@@ -57,84 +49,68 @@ const { univerAPI } = createUniver({
     }),
   ],
 });
-//Global declaration
+
+// Create a sheet
 univerAPI.createUniverSheet({ name: 'Test Sheet' });
-const sheet = univerAPI.getActiveWorkbook()?.getActiveSheet();
-
-//global variables
-var fullSheetJSON: string = ""
-var LLMresponse: string = ""
+// Global variables
+var fullSheetJSON: string = "";
 var matrix: Matrix = {};
+var rangeJSON: string = "";
+const standaloneValues: Matrix = {};
+const tables: SheetTable[] = [];
+const sheet = univerAPI.getActiveWorkbook()?.getActiveSheet();
+const workbook = univerAPI.getActiveWorkbook() // for querying functions only
 
+//Declare LLM to use
+const gemini = new Gemini()
 
-async function updateSheet(LLMresponse: string) {
-  if (LLMresponse !== "") {
+function processLLMResponse(llmResponse: string): any { //because not using LLMs structured outputs, this f will sanitize the response from LLMs.
+  const codeBlockRegex = /^```json\s+([\s\S]*?)\s+```$/m;
+  const match = llmResponse.match(codeBlockRegex);
+  let jsonString: string;
+  if (match && match[1]) {
+    jsonString = match[1].trim();
+  } else {
+    jsonString = llmResponse.trim();
+  }
+  let parsedData: any = ""
+  try {
+    parsedData = JSON.parse(jsonString);
+  } catch (error) {
+    throw new Error(`Failed to parse JSON: ${(error as Error).message}`);
+  }
+  return parsedData;
+}
+
+async function updateSheet(responseData: any) {
+  responseData = processLLMResponse(responseData)
+  if (responseData !== "") {
     try {
-      // Sanitize and parse response
-      const sanitizedResponse = LLMresponse.replace(/```[\s\S]*?\n|```/g, "").trim();
-      const response = JSON.parse(sanitizedResponse);
-
-      // Get the active sheet instance
-      const sheet = univerAPI.getActiveWorkbook()?.getActiveSheet();
-      if (!sheet) {
-        console.error("Sheet not found");
-        return;
+      // Ensure responseData is an object
+      if (typeof responseData !== 'object' || responseData === null) {
+        throw new Error("Response data is not a valid object.");
       }
-
       // Iterate through each table
-      (response.tables || []).forEach((table: SheetTable) => {
-        const { rows, tableBounds } = table;
+      (responseData.tables || []).forEach((table: SheetTable) => {
+        const { rows } = table;
 
-        if (!rows || !Array.isArray(rows)) {
-          console.warn("No rows found in table, skipping.");
+        if (!rows || typeof rows !== 'object') {
+          console.warn("No rows found in table or rows are not an object, skipping.");
           return;
         }
-
-        // Convert bounds to numbers
-        let startRow = parseInt(tableBounds.top, 10);
-        let endRow = parseInt(tableBounds.bottom, 10);
-        const startCol = parseInt(tableBounds.left, 10);
-        const endCol = parseInt(tableBounds.right, 10);
-
-        // Determine the dimensions
-        const numRows = endRow - startRow + 1;
-        const numCols = endCol - startCol + 1;
-
-        // Get existing data from the sheet in the specified range
-        const range = sheet.getRange(startRow, startCol, numRows, numCols);
-        const oldData = range.getValues();  // oldData is string[][]
-        
-        // Construct the new data array by merging old data with new data where applicable
-        const newData: string[][] = [];
-
-        for (let r = 0; r < numRows; r++) {
-          const currentRowIndex = startRow + r;
-          const currentRow = rows[currentRowIndex]; 
-          let newRowValues: string[];
-
-          if (
-            currentRow && 
-            Array.isArray(currentRow.columns) && 
-            currentRow.columns.length > 0
-          ) {
-            // Use new columns data
-            newRowValues = [];
-            for (let c = 0; c < numCols; c++) {
-              // If new data doesn't have a value at c, default to ""
-              newRowValues[c] = currentRow.columns[c] ?? "";
-            }
-          } else {
-            // Keep old values as is (if row is empty or not found)
-            newRowValues = oldData[r];
-          }
-
-          newData.push(newRowValues);
-        }
-
-        // Update the sheet with merged data
-        range.setValues(newData);
+        // Iterate through each row in the specified range
+        Object.keys(rows).forEach((row) => {
+          const currentRow = rows[row];
+          Object.keys(currentRow).forEach((col) => {
+            const cellData: ICellData = currentRow[col];
+            const cellValue: CellValue = cellData?.v ?? "";
+            // update 1 cell per time
+            const range = sheet?.getRange(parseInt(row), parseInt(col), 1, 1);
+            range?.setValues('')
+            range?.setValues([[cellValue]]);
+          })
+        })
       });
-
       console.log("Sheet successfully updated with LLM response.");
     } catch (error) {
       console.error("Error processing LLM response:", error);
@@ -144,89 +120,36 @@ async function updateSheet(LLMresponse: string) {
   }
 }
 
+function extractSelectedPart(selection: IRange){
+  const startRow = selection['startRow'];
+  const endRow = selection['endRow'];
+  const startColumn = selection['startColumn'];
+  const endColumn = selection['endColumn'];
 
-
-
-// Attach the event listener when the app loads
-window.addEventListener("keydown", async (event) =>  {
-  // Check for Ctrl + A
-  if (event.ctrlKey && event.key === "s") {
-    event.preventDefault(); // Prevent default behavior of Ctrl + A
-    const userInput = window.prompt("Enter your text:", ""); // Open a prompt box
-
-    if (userInput !== null) {
-      const meta_prompt: string = `
-      You are tasked with completing the user's command on a spreadsheet based on its current tabular data structure, which has been converted into JSON format for processing. The JSON represents the spreadsheet's data, where each cell is identified by row and column keys. Missing values in the spreadsheet are represented by empty or undefined cells in the JSON.
-
-      You MUST RESPECT THE ORDER OF THE TABLE, KEEPING EMPTY ROWS/COLUMNS THE SAME AS THAT MEANS THE ORDER OF THE TABLE!
-
-      Analyze the user's command and the provided JSON data to determine the best way to fulfill the requirement. You have full autonomy to interpret and manipulate the data as needed to generate accurate and meaningful results. Ensure your solution integrates seamlessly into the spreadsheet, considering row and column contexts, relationships between data points, and patterns in the table.
-
-      Act independently and apply problem-solving skills to execute the task effectively. Provide the result in a structured format that directly aligns with the spreadsheet's layout and the user's intent.
-
-      For now, you are given this task : ${userInput} and the data structure which has been processed into JSON from spreadsheets table data. Here is the data:
-      ${fullSheetJSON}
-
-      `;
-      const gemini = new Gemini()
-      LLMresponse = await gemini.reply(meta_prompt)
-      console.log(`User prompt: ${meta_prompt}`)
-      console.log(`Response: ${LLMresponse}`)
+  // Collect values within the selected range
+  const rangeValues: Matrix = {};
+  for (let row = startRow; row <= endRow; row++) {
+    if (!rangeValues[row]) {
+      rangeValues[row] = {};
     }
-    if (LLMresponse !== ""){
-      updateSheet(LLMresponse)
+    let currentRow = matrix[row]
+    for (let column = startColumn; column <= endColumn; column++) {
+      const cellData: ICellData = currentRow?.[`${column}`] ?? {};
+      const cellValue: CellValue = cellData?.v ?? "";
+      rangeValues[row][column] = {v: cellValue}
+      rangeValues[row][column]['v'] = cellValue
     }
   }
-});
-
-univerAPI.getActiveWorkbook()?.onCellClick((cell) => {
-  var range = sheet?.getActiveRange(); // Get the selected range
-  matrix = cell['location']['worksheet']['_cellData']['_matrix']
-  console.log(matrix)
-  // Step 1: Extract all data from the matrix
-  const extractedData = extractTablesAndValues(matrix);
-
-  // Step 2: Format the extracted data into JSON
-  fullSheetJSON = JSON.stringify(extractedData, null, 2);
-
-  // Step 3: Log the concatenated string for the LLM prompt
-  console.log(`Full Sheet Context:\n${fullSheetJSON}`);
-
-  // Step 4: Log the selected range values
-  if (range) {
-    const selection = range['_range'];
-    const startRow = selection['startRow'];
-    const endRow = selection['endRow'];
-    const startColumn = selection['startColumn'];
-    const endColumn = selection['endColumn'];
-
-
-    // Collect values within the selected range
-    const rangeValues = [];
-    for (let row = startRow; row <= endRow; row++) {
-      const rowObject: {[key: string]: string} = {};
-      for (let column = startColumn; column <= endColumn; column++) {
-        const cellValue = matrix[row]?.[column]?.['v'];
-        rowObject[`Column_${column}`] = cellValue || "";
-      }
-      rangeValues.push({ [`Row_${row}`]: rowObject });
-    }
-
-    const rangeJSON = JSON.stringify(rangeValues, null, 2);
-    console.log(`Selected Range Values:\n${rangeJSON}`);
-  }
-});
+  rangeJSON = JSON.stringify(rangeValues, null, 2);
+  return rangeJSON
+}
 
 // Function to extract tables and standalone values from the matrix
 function extractTablesAndValues(matrix: Matrix) {
-  const standaloneValues = [];
-  const tables: SheetTable[] = [];
 
-  const headers: string[] = [];
   const table: SheetTable = {
-    tableName: "example",
-    headers,
-    rows: [],
+    tableName: "",
+    rows: {},
     tableBounds: {
       left: "",
       top: "",
@@ -234,13 +157,12 @@ function extractTablesAndValues(matrix: Matrix) {
       bottom: ""
     }
   };
-
   // Helper to check if cell is valid (exists and not visited)
   const isValidCell = (row: string, column: string) =>
     matrix[row]?.[column]?.['v'] !== undefined;
 
   const first_row = parseInt(Object.keys(matrix)[0])
-  const first_col = parseInt(Object.keys(matrix[first_row.toString()])[0])
+  const first_col: number = 0
 
   let minRow: number = first_row;
   let maxRow: number = first_row;
@@ -249,13 +171,9 @@ function extractTablesAndValues(matrix: Matrix) {
 
   // Main loop
   for (const row in matrix) {
-    if (!table.rows[parseInt(row)]) {
-      table.rows[parseInt(row)] = { columns: [] };
-    }
-
     for (const column in matrix[row]) {
       if (isValidCell(row, column)) {
-        const cellValue = matrix[row][column]['v'];
+        const cellValue = matrix[row][column].v;
         // Check if cell is standalone
         const isStandalone =
           !matrix[+row - 1]?.[+column] &&  // Top
@@ -266,13 +184,14 @@ function extractTablesAndValues(matrix: Matrix) {
 
         if (isStandalone) {
           // Standalone value
-          standaloneValues.push({
-            [`Row_${parseInt(row)}`]: { [`Column_${parseInt(column)+1}`]: cellValue?.toString() ?? "" }
-          });
+          standaloneValues[row][column]['v'] = cellValue?.toString() ?? "";
         } else {
           // table
-          table.rows[parseInt(row)].columns[parseInt(column)] = strValue ?? "";
-
+          if (!table.rows[row]){
+            table.rows[row] = {}
+          }
+          table.rows[row][column] = {v: cellValue}
+          table.rows[row][column]['v'] = strValue ?? "";
           // Track bounds
           minCol = parseInt(column) < minCol ? parseInt(column) : minCol;
           maxCol = parseInt(column) > maxCol ? parseInt(column) : maxCol;
@@ -288,14 +207,53 @@ function extractTablesAndValues(matrix: Matrix) {
     table.tableBounds.top = minRow.toString();
   }
 
-  // Extract headers from the first row of the table
-  for (const e_cols in matrix[minRow]) {
-    headers.push(matrix[minRow][e_cols]['v']?.toString() ?? "");
-  }
   tables.push(table);
   return { tables, standaloneValues };
 }
 
+//Some events
+// Event Listener for Keyboard Shortcuts
+window.addEventListener("keydown", async (event) => {
+  // Check for Ctrl + E (Edit existing data)
+  if (event.ctrlKey && event.key === "e") {
+    let createResponse: string = ""
+    event.preventDefault();
+    const userInput = window.prompt("Enter your edit instructions:", "");
+    if (userInput !== null) {
+      createResponse = await gemini.requestEditFromLLM(userInput, fullSheetJSON)
+      console.log(`User prompt: ${userInput}`)
+      console.log(`AI speaking...\n${createResponse}`)
+    }
+    if (createResponse){
+      updateSheet(createResponse)
+    }
+  }
+    // Check for Ctrl + B (Create new data from scratch)
+    if (event.ctrlKey && event.key === "b") {
+      let editResponse: string = ""
+      event.preventDefault();
+      const userCreationRequest = window.prompt("Enter your creation instructions:", "");
+      if (userCreationRequest !== null && userCreationRequest.trim() !== "") {
+        editResponse = await gemini.requestNewSpreadsheetFromLLM(userCreationRequest, fullSheetJSON);
+        console.log(`User prompt: ${userCreationRequest}`)
+        console.log(`AI speaking...\n${editResponse}`)
+      }
+      if(editResponse){
+        updateSheet(editResponse)
+      }
+    }
+});
 
-
-//TODO: Separate tables if many on one sheet
+univerAPI.getActiveWorkbook()?.onCellClick((cell) => {
+  matrix = cell['location']['worksheet']['_cellData']['_matrix']
+  const extractedData = extractTablesAndValues(matrix);
+  fullSheetJSON = JSON.stringify(extractedData, null, 2);
+  console.log(`Full Sheet Context:\n${fullSheetJSON}`) //Full sheet context
+  
+  var range = sheet?.getActiveRange(); // Get the selected range
+  if (range) { 
+    const selection = range['_range'];
+    rangeJSON = extractSelectedPart(selection)
+    console.log(`Selected Range Values:\n${rangeJSON}`);
+  }
+});
