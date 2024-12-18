@@ -53,16 +53,19 @@ const { univerAPI } = createUniver({
 // Create a sheet
 univerAPI.createUniverSheet({ name: 'Test Sheet' });
 // Global variables
-var fullSheetJSON: string = "";
-var matrix: Matrix = {};
-var rangeJSON: string = "";
+var fullSheetJSON: string = ""; //Whole context of the current sheet
+var rangeJSON: string = ""; //Selected context of current sheet
+
+//these 2 var below are crafted together to create whole sheet context
 const standaloneValues: Matrix = {};
 const tables: SheetTable[] = [];
+
 const sheet = univerAPI.getActiveWorkbook()?.getActiveSheet();
-const workbook = univerAPI.getActiveWorkbook() // for querying functions only
+const workbook = univerAPI.getActiveWorkbook() // for checking available functions only
 
 //Declare LLM to use
 const gemini = new Gemini()
+
 
 function processLLMResponse(llmResponse: string): any { //because not using LLMs structured outputs, this f will sanitize the response from LLMs.
   const codeBlockRegex = /^```json\s+([\s\S]*?)\s+```$/m;
@@ -120,112 +123,172 @@ async function updateSheet(responseData: any) {
   }
 }
 
-function extractSelectedPart(selection: IRange){
-  const startRow = selection['startRow'];
-  const endRow = selection['endRow'];
-  const startColumn = selection['startColumn'];
-  const endColumn = selection['endColumn'];
+function extractSelectedPart(selection: IRange, matrix: Matrix): {  } {
+  const extractedData = extractTablesAndValues(matrix);
+  // Extract tables that intersect the selection
+  const {tables, standaloneValues} = extractedData;
 
-  // Collect values within the selected range
-  const rangeValues: Matrix = {};
-  for (let row = startRow; row <= endRow; row++) {
-    if (!rangeValues[row]) {
-      rangeValues[row] = {};
-    }
-    let currentRow = matrix[row]
-    for (let column = startColumn; column <= endColumn; column++) {
-      const cellData: ICellData = currentRow?.[`${column}`] ?? {};
-      const cellValue: CellValue = cellData?.v ?? "";
-      rangeValues[row][column] = {v: cellValue}
-      rangeValues[row][column]['v'] = cellValue
-    }
-  }
-  rangeJSON = JSON.stringify(rangeValues, null, 2);
-  return rangeJSON
-}
+  const selectedTables: SheetTable[] = [];
 
-// Function to extract tables and standalone values from the matrix
-function extractTablesAndValues(matrix: Matrix) {
+  for (const t of tables) {
+    const tleft = parseInt(t.tableBounds.left);
+    const ttop = parseInt(t.tableBounds.top);
+    const tright = parseInt(t.tableBounds.right);
+    const tbottom = parseInt(t.tableBounds.bottom);
 
-  const table: SheetTable = {
-    tableName: "",
-    rows: {},
-    tableBounds: {
-      left: "",
-      top: "",
-      right: "",
-      bottom: ""
-    }
-  };
-  // Helper to check if cell is valid (exists and not visited)
-  const isValidCell = (row: string, column: string) =>
-    matrix[row]?.[column]?.['v'] !== undefined;
+    // Check intersection with selection
+    const startRow = selection['startRow'];
+    const endRow = selection['endRow'];
+    const startColumn = selection['startColumn'];
+    const endColumn = selection['endColumn'];
 
-  const first_row = parseInt(Object.keys(matrix)[0])
-  const first_col: number = 0
+    const intersectRowStart = Math.max(startRow, ttop);
+    const intersectRowEnd = Math.min(endRow, tbottom);
+    const intersectColStart = Math.max(startColumn, tleft);
+    const intersectColEnd = Math.min(endColumn, tright);
 
-  let minRow: number = first_row;
-  let maxRow: number = first_row;
-  let minCol: number = first_col;
-  let maxCol: number = first_col;
-
-  // Main loop
-  for (const row in matrix) {
-    for (const column in matrix[row]) {
-      if (isValidCell(row, column)) {
-        const cellValue = matrix[row][column].v;
-        // Check if cell is standalone
-        const isStandalone =
-          !matrix[+row - 1]?.[+column] &&  // Top
-          !matrix[+row + 1]?.[+column] &&  // Bottom
-          !matrix[+row]?.[+column - 1] &&  // Left
-          !matrix[+row]?.[+column + 1];    // Right
-          const strValue = cellValue?.toString() ?? "";
-
-        if (isStandalone) {
-          // Standalone value
-          standaloneValues[row][column]['v'] = cellValue?.toString() ?? "";
-        } else {
-          // table
-          if (!table.rows[row]){
-            table.rows[row] = {}
-          }
-          table.rows[row][column] = {v: cellValue}
-          table.rows[row][column]['v'] = strValue ?? "";
-          // Track bounds
-          minCol = parseInt(column) < minCol ? parseInt(column) : minCol;
-          maxCol = parseInt(column) > maxCol ? parseInt(column) : maxCol;
-          table.tableBounds.left = minCol.toString();
-          table.tableBounds.right = maxCol.toString();
+    if (intersectRowStart <= intersectRowEnd && intersectColStart <= intersectColEnd) {
+      // The selection overlaps with this table
+      const partialRows: Matrix = {};
+      for (let r = intersectRowStart; r <= intersectRowEnd; r++) {
+        partialRows[r] = {};
+        for (let c = intersectColStart; c <= intersectColEnd; c++) {
+          partialRows[r][c] = t.rows[r][c] ?? {v:""};
         }
       }
+
+      selectedTables.push({
+        tableName: t.tableName, 
+        rows: partialRows,
+        tableBounds: {
+          left: intersectColStart.toString(),
+          top: intersectRowStart.toString(),
+          right: intersectColEnd.toString(),
+          bottom: intersectRowEnd.toString()
+        }
+      });
     }
-    // Update row bounds
-    minRow = parseInt(row) < minRow ? parseInt(row) : minRow;
-    maxRow = parseInt(row) > maxRow ? parseInt(row) : maxRow;
-    table.tableBounds.bottom = maxRow.toString();
-    table.tableBounds.top = minRow.toString();
   }
 
-  tables.push(table);
+  // If no tables intersect and you want to return standaloneValues or empty structure:
+  // For consistency, let's return { tables: selectedTables, standaloneValues: {} } if no intersection
+  return { tables: selectedTables, standaloneValues: {} };
+}
+
+
+function findTables(matrix: Matrix): {tables: SheetTable[], standaloneValues: Matrix} {
+  const visited = new Set<string>();
+  const directions = [[1,0],[-1,0],[0,1],[0,-1]];
+  const cells: [number, number][] = [];
+
+  // Collect all valid cells
+  for (const row in matrix) {
+    for (const col in matrix[row]) {
+      if (matrix[row][col]?.v !== undefined) {
+        cells.push([parseInt(row), parseInt(col)]);
+      }
+    }
+  }
+
+  function neighbors(r: number, c: number): [number,number][] {
+    const result: [number,number][] = [];
+    for (const [dr,dc] of directions) {
+      const nr = r+dr, nc = c+dc;
+      if (matrix[nr]?.[nc]?.v !== undefined) {
+        result.push([nr,nc]);
+      }
+    }
+    return result;
+  }
+
+  const tables: SheetTable[] = [];
+  let tableCount = 0;
+
+  for (const [r,c] of cells) {
+    const key = `${r},${c}`;
+    if (!visited.has(key)) {
+      // BFS/DFS to find all cells in this connected component
+      const queue = [[r,c]];
+      visited.add(key);
+      const component: [number,number][] = [[r,c]];
+
+      while (queue.length > 0) {
+        const [cr, cc] = queue.shift()!;
+        for (const [nr,nc] of neighbors(cr,cc)) {
+          const nkey = `${nr},${nc}`;
+          if (!visited.has(nkey)) {
+            visited.add(nkey);
+            queue.push([nr,nc]);
+            component.push([nr,nc]);
+          }
+        }
+      }
+
+      // Now component is one table
+      // Compute bounds
+      const rowsC = component.map(v=>v[0]);
+      const colsC = component.map(v=>v[1]);
+      const minRow = Math.min(...rowsC);
+      const maxRow = Math.max(...rowsC);
+      const minCol = Math.min(...colsC);
+      const maxCol = Math.max(...colsC);
+
+      const tableRows: Matrix = {};
+      for (let rr = minRow; rr <= maxRow; rr++) {
+        tableRows[rr] = {};
+      }
+      for (const [cr, cc] of component) {
+        const val = matrix[cr][cc].v ?? "";
+        tableRows[cr][cc] = {v: val};
+      }
+
+      tableCount++;
+      tables.push({
+        tableName: `Table ${tableCount}`,
+        rows: tableRows,
+        tableBounds: {
+          left: minCol.toString(),
+          top: minRow.toString(),
+          right: maxCol.toString(),
+          bottom: maxRow.toString()
+        }
+      });
+    }
+  }
+
+  const standaloneValues: Matrix = {}; // If you still want to track isolated cells differently, handle that here
+  // For simplicity, we considered every connected cell block as a table, including single-cell ones.
+  // If you want to keep truly isolated cells as standaloneValues, you'd only do BFS for components of size > 1 and treat size=1 differently.
+
+  return {tables, standaloneValues};
+}
+
+function extractTablesAndValues(matrix: Matrix) {
+  const {tables, standaloneValues} = findTables(matrix);
+
   return { tables, standaloneValues };
 }
+
+// This function now returns the fullSheetJSON with multiple tables named and separated.
+
 
 //Some events
 // Event Listener for Keyboard Shortcuts
 window.addEventListener("keydown", async (event) => {
   // Check for Ctrl + E (Edit existing data)
   if (event.ctrlKey && event.key === "e") {
-    let createResponse: string = ""
-    event.preventDefault();
-    const userInput = window.prompt("Enter your edit instructions:", "");
-    if (userInput !== null) {
-      createResponse = await gemini.requestEditFromLLM(userInput, fullSheetJSON)
-      console.log(`User prompt: ${userInput}`)
-      console.log(`AI speaking...\n${createResponse}`)
-    }
-    if (createResponse){
-      updateSheet(createResponse)
+    if (rangeJSON){
+      let createResponse: string = ""
+      event.preventDefault();
+      const userInput = window.prompt("Enter your edit instructions:", "");
+      if (userInput !== null) {
+        createResponse = await gemini.requestEdit(userInput, rangeJSON)
+        console.log(`User prompt: ${userInput}`)
+        console.log(`AI speaking...\n${createResponse}`)
+      }
+      if (createResponse){
+        updateSheet(createResponse)
+      }
     }
   }
     // Check for Ctrl + B (Create new data from scratch)
@@ -234,7 +297,7 @@ window.addEventListener("keydown", async (event) => {
       event.preventDefault();
       const userCreationRequest = window.prompt("Enter your creation instructions:", "");
       if (userCreationRequest !== null && userCreationRequest.trim() !== "") {
-        editResponse = await gemini.requestNewSpreadsheetFromLLM(userCreationRequest, fullSheetJSON);
+        editResponse = await gemini.requestCreate(userCreationRequest);
         console.log(`User prompt: ${userCreationRequest}`)
         console.log(`AI speaking...\n${editResponse}`)
       }
@@ -245,15 +308,16 @@ window.addEventListener("keydown", async (event) => {
 });
 
 univerAPI.getActiveWorkbook()?.onCellClick((cell) => {
-  matrix = cell['location']['worksheet']['_cellData']['_matrix']
+  const matrix: Matrix = cell['location']['worksheet']['_cellData']['_matrix'] //By default, clicking on cell will log a matrix of "active" rows and columns on the sheet. This is used to extract that data
   const extractedData = extractTablesAndValues(matrix);
   fullSheetJSON = JSON.stringify(extractedData, null, 2);
+  gemini.cachedContext = fullSheetJSON
   console.log(`Full Sheet Context:\n${fullSheetJSON}`) //Full sheet context
   
   var range = sheet?.getActiveRange(); // Get the selected range
   if (range) { 
     const selection = range['_range'];
-    rangeJSON = extractSelectedPart(selection)
-    console.log(`Selected Range Values:\n${rangeJSON}`);
+    rangeJSON = extractSelectedPart(selection, matrix)
+    console.log(`Selected Range Values:`, rangeJSON["tables"]);
   }
 });
