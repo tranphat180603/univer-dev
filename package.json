@@ -46,6 +46,9 @@
     "@univerjs/sheets-ui": "^0.5.1",
     "@univerjs/thread-comment": "^0.5.1",
     "@univerjs/ui": "^0.5.1",
-    "cli-table3": "^0.6.5"
+    "cli-table3": "^0.6.5",
+    "danfojs": "^1.1.2",
+    "data-forge": "^1.10.2",
+    "pymport": "^1.5.1"
   }
 }
